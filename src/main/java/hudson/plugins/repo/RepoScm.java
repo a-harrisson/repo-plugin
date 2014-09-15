@@ -303,6 +303,7 @@ public class RepoScm extends SCM implements Serializable {
 			final FilePath workspace, final TaskListener listener,
 			final SCMRevisionState baseline) throws IOException,
 			InterruptedException {
+		EnvVars env = project.getEnvironment(null, listener);
 		SCMRevisionState myBaseline = baseline;
 		final String expandedManifestBranch =
 				getManifestBranchExpanded(null, project);
@@ -326,17 +327,19 @@ public class RepoScm extends SCM implements Serializable {
 			repoDir = workspace;
 		}
 
-		if (!checkoutCode(launcher, repoDir, expandedManifestBranch,
-			listener.getLogger())) {
+		if (!checkoutCode(launcher, repoDir, env, expandedManifestBranch,
+				listener.getLogger())) {
 			// Some error occurred, try a build now so it gets logged.
 			return new PollingResult(myBaseline, myBaseline,
 					Change.INCOMPARABLE);
 		}
 
 		final RevisionState currentState = new RevisionState(
-				getStaticManifest(launcher, repoDir, listener.getLogger()),
-				getManifestRevision(launcher, repoDir, listener.getLogger()),
-				expandedManifestBranch, listener.getLogger());
+				getStaticManifest(launcher, repoDir, env,
+					listener.getLogger()),
+				getManifestRevision(launcher, repoDir, env,
+					listener.getLogger()),
+					expandedManifestBranch, listener.getLogger());
 		final Change change;
 		if (currentState.equals(myBaseline)) {
 			change = Change.NONE;
@@ -366,14 +369,15 @@ public class RepoScm extends SCM implements Serializable {
 		EnvVars env = build.getEnvironment(listener);
 		final String expandedBranch = getManifestBranchExpanded(
 				env, build.getProject());
-		if (!checkoutCode(launcher, repoDir, expandedBranch,
+		if (!checkoutCode(launcher, repoDir, env, expandedBranch,
 				listener.getLogger())) {
 			return false;
 		}
 		final String manifest =
-				getStaticManifest(launcher, repoDir, listener.getLogger());
+				getStaticManifest(launcher, repoDir, env, listener.getLogger());
 		final String manifestRevision =
-				getManifestRevision(launcher, repoDir, listener.getLogger());
+				getManifestRevision(launcher, repoDir, env,
+					listener.getLogger());
 		final RevisionState currentState =
 				new RevisionState(manifest, manifestRevision, expandedBranch,
 						listener.getLogger());
@@ -390,7 +394,7 @@ public class RepoScm extends SCM implements Serializable {
 	}
 
 	private int doSync(final Launcher launcher, final FilePath workspace,
-			final OutputStream logger)
+			final EnvVars env, final OutputStream logger)
 		throws IOException, InterruptedException {
 		final List<String> commands = new ArrayList<String>(4);
 		debug.log(Level.FINE, "Syncing out code in: " + workspace.getName());
@@ -408,14 +412,14 @@ public class RepoScm extends SCM implements Serializable {
 			commands.add("--jobs=" + jobs);
 		}
 		int returnCode =
-				launcher.launch().stdout(logger).pwd(workspace)
+				launcher.launch().envs(env).stdout(logger).pwd(workspace)
 						.cmds(commands).join();
 		return returnCode;
 	}
 
 	private boolean checkoutCode(final Launcher launcher,
-			final FilePath workspace, final String expandedManifestBranch,
-			final OutputStream logger)
+			final FilePath workspace, final EnvVars env,
+			final String expandedManifestBranch, final OutputStream logger)
 			throws IOException, InterruptedException {
 		final List<String> commands = new ArrayList<String>(4);
 
@@ -445,7 +449,7 @@ public class RepoScm extends SCM implements Serializable {
 			commands.add(manifestGroup);
 		}
 		int returnCode =
-				launcher.launch().stdout(logger).pwd(workspace)
+				launcher.launch().envs(env).stdout(logger).pwd(workspace)
 						.cmds(commands).join();
 		if (returnCode != 0) {
 			return false;
@@ -464,7 +468,7 @@ public class RepoScm extends SCM implements Serializable {
 			}
 		}
 
-		returnCode = doSync(launcher, workspace, logger);
+		returnCode = doSync(launcher, workspace, env, logger);
 		if (returnCode != 0) {
 			debug.log(Level.WARNING, "Sync failed. Resetting repository");
 			commands.clear();
@@ -472,9 +476,9 @@ public class RepoScm extends SCM implements Serializable {
 			commands.add("forall");
 			commands.add("-c");
 			commands.add("git reset --hard");
-			launcher.launch().stdout(logger).pwd(workspace).cmds(commands)
-				.join();
-			returnCode = doSync(launcher, workspace, logger);
+			launcher.launch().envs(env).stdout(logger).pwd(workspace)
+				.cmds(commands).join();
+			returnCode = doSync(launcher, workspace, env, logger);
 			if (returnCode != 0) {
 				return false;
 			}
@@ -483,8 +487,9 @@ public class RepoScm extends SCM implements Serializable {
 	}
 
 	private String getStaticManifest(final Launcher launcher,
-			final FilePath workspace, final OutputStream logger)
-			throws IOException, InterruptedException {
+			final FilePath workspace, final EnvVars env,
+			final OutputStream logger)
+				throws IOException, InterruptedException {
 		final ByteArrayOutputStream output = new ByteArrayOutputStream();
 		final List<String> commands = new ArrayList<String>(6);
 		commands.add(getDescriptor().getExecutable());
@@ -493,24 +498,25 @@ public class RepoScm extends SCM implements Serializable {
 		commands.add("-");
 		commands.add("-r");
 		// TODO: should we pay attention to the output from this?
-		launcher.launch().stderr(logger).stdout(output).pwd(workspace)
-				.cmds(commands).join();
+		launcher.launch().envs(env).stderr(logger).stdout(output)
+				.pwd(workspace).cmds(commands).join();
 		final String manifestText = output.toString();
 		debug.log(Level.FINEST, manifestText);
 		return manifestText;
 	}
 
 	private String getManifestRevision(final Launcher launcher,
-			final FilePath workspace, final OutputStream logger)
-			throws IOException, InterruptedException {
+			final FilePath workspace, final EnvVars env,
+			final OutputStream logger)
+					throws IOException, InterruptedException {
 		final ByteArrayOutputStream output = new ByteArrayOutputStream();
 		final List<String> commands = new ArrayList<String>(6);
 		commands.add("git");
 		commands.add("rev-parse");
 		commands.add("HEAD");
-		launcher.launch().stderr(logger).stdout(output).pwd(
-				new FilePath(workspace, ".repo/manifests"))
-				.cmds(commands).join();
+		launcher.launch().envs(env).stderr(logger).stdout(output)
+				.pwd(new FilePath(workspace, ".repo/manifests")).cmds(commands)
+				.join();
 		final String manifestText = output.toString().trim();
 		debug.log(Level.FINEST, manifestText);
 		return manifestText;
