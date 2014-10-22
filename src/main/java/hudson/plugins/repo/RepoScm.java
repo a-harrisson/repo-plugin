@@ -328,7 +328,7 @@ public class RepoScm extends SCM implements Serializable {
 		}
 
 		if (!checkoutCode(launcher, repoDir, env, expandedManifestBranch,
-				listener.getLogger())) {
+			listener.getLogger())) {
 			// Some error occurred, try a build now so it gets logged.
 			return new PollingResult(myBaseline, myBaseline,
 					Change.INCOMPARABLE);
